@@ -171,22 +171,37 @@ def acs(r):
     if user_identity is None:
         return HttpResponseRedirect(get_reverse([denied, 'denied', 'django_saml2_auth:denied']))
 
-    user_email = user_identity[settings.SAML2_AUTH.get('ATTRIBUTES_MAP', {}).get('email', 'Email')][0]
-    user_name = user_identity[settings.SAML2_AUTH.get('ATTRIBUTES_MAP', {}).get('username', 'UserName')][0]
-    user_first_name = user_identity[settings.SAML2_AUTH.get('ATTRIBUTES_MAP', {}).get('first_name', 'FirstName')][0]
-    user_last_name = user_identity[settings.SAML2_AUTH.get('ATTRIBUTES_MAP', {}).get('last_name', 'LastName')][0]
+    my_attrs = { x : "unknown" for x in ['user_email','user_first_name', 'user_last_name', 'user_name'] }
+   
+    print( user_identity)
+    
+    lookup = {
+        'user_email' : ('email', 'Email'),
+        'user_name': ('username', 'UserName'),
+        'user_first_name': ('first_name', 'FirstName'),
+        'user_last_name' : ('last_name', 'LastName'),
+    }
+
+    attrs = settings.SAML2_AUTH.get('ATTRIBUTES_MAP', {})
+    
+    for x in lookup :
+        name = attrs.get(lookup[x])
+        if name in user_identity:
+            v = user_identity[name]
+            if v:
+                my_attrs[x] = v[0]
 
     target_user = None
     is_new_user = False
 
     try:
-        target_user = User.objects.get(username=user_name)
+        target_user = User.objects.get(username=my_attrs['user_name'])
         if settings.SAML2_AUTH.get('TRIGGER', {}).get('BEFORE_LOGIN', None):
             import_string(settings.SAML2_AUTH['TRIGGER']['BEFORE_LOGIN'])(user_identity)
     except User.DoesNotExist:
         new_user_should_be_created = settings.SAML2_AUTH.get('CREATE_USER', True)
-        if new_user_should_be_created: 
-            target_user = _create_new_user(user_name, user_email, user_first_name, user_last_name)
+        if new_user_should_be_created: OA
+            target_user = _create_new_user(**my_attrs)
             if settings.SAML2_AUTH.get('TRIGGER', {}).get('CREATE_USER', None):
                 import_string(settings.SAML2_AUTH['TRIGGER']['CREATE_USER'])(user_identity)
             is_new_user = True

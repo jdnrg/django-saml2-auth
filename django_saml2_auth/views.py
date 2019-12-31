@@ -1,6 +1,9 @@
 #!/usr/bin/env python
 # -*- coding:utf-8 -*-
 
+import logging
+
+logger = logging.getLogger(__name__)
 
 from saml2 import (
     BINDING_HTTP_POST,
@@ -118,6 +121,8 @@ def _get_saml_client(domain):
     if 'NAME_ID_FORMAT' in settings.SAML2_AUTH:
         saml_settings['service']['sp']['name_id_format'] = settings.SAML2_AUTH['NAME_ID_FORMAT']
 
+    logger.error("SAML_SETTINGS {}".format(saml_settings))
+    
     spConfig = Saml2Config()
     spConfig.load(saml_settings)
     spConfig.allow_unknown_attributes = True
@@ -137,10 +142,10 @@ def denied(r):
     return render(r, 'django_saml2_auth/denied.html')
 
 
-def _create_new_user(username, email, firstname, lastname):
-    user = User.objects.create_user(username, email)
-    user.first_name = firstname
-    user.last_name = lastname
+def _create_new_user(user_name, user_email, user_first_name, user_last_name):
+    user = User.objects.create_user(user_name, user_email)
+    user.first_name = user_first_name
+    user.last_name = user_last_name
     groups = [Group.objects.get(name=x) for x in settings.SAML2_AUTH.get('NEW_USER_PROFILE', {}).get('USER_GROUPS', [])]
     if parse_version(get_version()) >= parse_version('2.0'):
         user.groups.set(groups)
@@ -164,16 +169,34 @@ def acs(r):
 
     authn_response = saml_client.parse_authn_request_response(
         resp, entity.BINDING_HTTP_POST)
+
+    user_email = authn_response.name_id.text
+    logger.error("authn_response.name_id.text {}".format(authn_response.name_id.text))
+    #logger.error("authn_response.name_id {}".format(authn_response.name_id))
+    #   logger.error("authn_response.name_id {}".format(dir(authn_response.name_id)))
+    #logger.error("authn_response.name_id {}".format(authn_response.name_id.__dict__))
+    #logger.error("authn_response {}".format(authn_response))
+    #logger.error("authn_response {}".format(dir(authn_response)))
+    #logger.error("authn_response {}".format(authn_response.__dict__))
     if authn_response is None:
         return HttpResponseRedirect(get_reverse([denied, 'denied', 'django_saml2_auth:denied']))
 
     user_identity = authn_response.get_identity()
+    logger.error("USER_IDENTITY {}".format(user_identity))
     if user_identity is None:
         return HttpResponseRedirect(get_reverse([denied, 'denied', 'django_saml2_auth:denied']))
 
     my_attrs = { x : "unknown" for x in ['user_email','user_first_name', 'user_last_name', 'user_name'] }
-   
-    print( user_identity)
+    my_attrs['user_email'] = user_email
+    try :
+        my_attrs['user_first_name'] = user_email.split(".")[0]
+        my_attrs['user_last_name'] = user_email.split(".")[1].split("@")[0]
+        my_attrs['user_name'] = my_attrs['user_first_name'][0] + my_attrs['user_last_name'].lower()
+    except Exception as e:
+        logger.error("error {}".format(e))
+
+    logger.warning("attrs {}".format(my_attrs))
+
     
     lookup = {
         'user_email' : ('email', 'Email'),
@@ -190,7 +213,7 @@ def acs(r):
             v = user_identity[name]
             if v:
                 my_attrs[x] = v[0]
-
+    logger.warning("attrs2 {}".format(my_attrs))
     target_user = None
     is_new_user = False
 
@@ -200,7 +223,7 @@ def acs(r):
             import_string(settings.SAML2_AUTH['TRIGGER']['BEFORE_LOGIN'])(user_identity)
     except User.DoesNotExist:
         new_user_should_be_created = settings.SAML2_AUTH.get('CREATE_USER', True)
-        if new_user_should_be_created: OA
+        if new_user_should_be_created:
             target_user = _create_new_user(**my_attrs)
             if settings.SAML2_AUTH.get('TRIGGER', {}).get('CREATE_USER', None):
                 import_string(settings.SAML2_AUTH['TRIGGER']['CREATE_USER'])(user_identity)

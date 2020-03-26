@@ -121,7 +121,7 @@ def _get_saml_client(domain):
     if 'NAME_ID_FORMAT' in settings.SAML2_AUTH:
         saml_settings['service']['sp']['name_id_format'] = settings.SAML2_AUTH['NAME_ID_FORMAT']
 
-    logger.error("SAML_SETTINGS {}".format(saml_settings))
+    logger.warn("DEBUG SAML_SETTINGS {}".format(saml_settings))
     
     spConfig = Saml2Config()
     spConfig.load(saml_settings)
@@ -142,18 +142,29 @@ def denied(r):
     return render(r, 'django_saml2_auth/denied.html')
 
 
-def _create_new_user(user_name, user_email, user_first_name, user_last_name):
+def _create_new_user(user_name, user_email, user_first_name, user_last_name, user_groups, user_group_names):
     user = User.objects.create_user(user_name, user_email)
     user.first_name = user_first_name
     user.last_name = user_last_name
-    groups = [Group.objects.get(name=x) for x in settings.SAML2_AUTH.get('NEW_USER_PROFILE', {}).get('USER_GROUPS', [])]
+    AD_SUPERUSER_GROUPS =  getattr(settings, "AD_SUPERUSER_GROUPS", [])
+    AD_STAFF_GROUPS =  getattr(settings, "AD_STAFF_GROUPS", [])
+    in_super = False
+    in_staff = False
+
+    if AD_SUPERUSER_GROUPS in user_group_names:
+        user_object.is_superuser =False
+
+    if AD_STAFF_GROUPS in user_group_names:
+        user_object.is_staff =False
+
     if parse_version(get_version()) >= parse_version('2.0'):
-        user.groups.set(groups)
+        user.groups.set(user_groups)
     else:
-        user.groups = groups
+        user.groups = user_groups
+
     user.is_active = settings.SAML2_AUTH.get('NEW_USER_PROFILE', {}).get('ACTIVE_STATUS', True)
-    user.is_staff = settings.SAML2_AUTH.get('NEW_USER_PROFILE', {}).get('STAFF_STATUS', True)
-    user.is_superuser = settings.SAML2_AUTH.get('NEW_USER_PROFILE', {}).get('SUPERUSER_STATUS', False)
+#    user.is_staff = settings.SAML2_AUTH.get('NEW_USER_PROFILE', {}).get('STAFF_STATUS', True)
+#    user.is_superuser = settings.SAML2_AUTH.get('NEW_USER_PROFILE', {}).get('SUPERUSER_STATUS', False)
     user.save()
     return user
 
@@ -194,6 +205,17 @@ def acs(r):
         my_attrs['user_name'] = my_attrs['user_first_name'][0] + my_attrs['user_last_name'].lower()
     except Exception as e:
         logger.error("error {}".format(e))
+
+    user_groups = []
+    user_groups_names = []
+    if 'Groups' in user_identity:
+        for group in user_identity['Groups']:
+            group_name = group.lower().replace(' ','_').replace('-','_')
+            ogrp = Group.objects.get_or_create(name=group_name)
+            user_groups.append(ogrp)
+            user_group_names.append(group)
+    my_attrs['user_groups'] = user_groups
+    my_attrs['user_group_names'] = user_group_names
 
     logger.warning("attrs {}".format(my_attrs))
 
